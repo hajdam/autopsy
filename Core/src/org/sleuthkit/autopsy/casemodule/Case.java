@@ -31,6 +31,8 @@ import java.awt.event.ActionListener;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
 import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -181,6 +183,7 @@ public class Case {
     private static final String CASE_RESOURCES_THREAD_NAME = "%s-manage-case-resources";
     private static final String NO_NODE_ERROR_MSG_FRAGMENT = "KeeperErrorCode = NoNode";
     private static final String CT_PROVIDER_PREFIX = "CTStandardContentProvider_";
+    private static final String LOCK_FILE_NAME = "lock";
     private static final Logger logger = Logger.getLogger(Case.class.getName());
     private static final AutopsyEventPublisher eventPublisher = new AutopsyEventPublisher();
     private static final Object caseActionSerializationLock = new Object();
@@ -197,6 +200,10 @@ public class Case {
     private CollaborationMonitor collaborationMonitor;
     private Services caseServices;
 
+    private RansomAccessFile lockFileRaf = null;
+    private FileChannel lockFileChannel = null;
+    private FileLock lockFileLock = null;
+        
     private volatile boolean hasDataSource = false;
     private volatile boolean hasData = false;
 
@@ -768,6 +775,57 @@ public class Case {
         return !(caseName.contains("\\") || caseName.contains("/") || caseName.contains(":")
                 || caseName.contains("*") || caseName.contains("?") || caseName.contains("\"")
                 || caseName.contains("<") || caseName.contains(">") || caseName.contains("|"));
+    }
+    
+    
+    /**
+     * Try to acquire a lock to the lock file in the case directory.
+     * @param caseDir The case directory that the autopsy.db is in.
+     * @throws IllegalAccessException
+     * @throws IOException 
+     */
+    private void tryAcquireFileLock(String caseDir) throws ConcurrentDbAccessException, IOException {
+        File lockFile = new File(caseDir, LOCK_FILE_NAME);
+        lockFile.getParentFile().mkdirs();
+        lockFileRaf = new RandomAccessFile(lockFile, "rw");
+        lockFileChannel = lockFileRaf.getChannel();
+        lockFileLock = lockFileChannel.tryLock();
+        if (lockFileLock == null) {
+            String conflictingApplication = null;
+            try {
+            StringBuffer buffer = new StringBuffer();
+            while (lockFileRaf.getFilePointer() < lockFileRaf.length()) {
+                buffer.append(lockFileRaf.readLine() + System.lineSeparator());
+            }
+            conflictingApplication = buffer.toString();
+            } finally {
+                throw new ConcurrentDbAccessException("Unable to acquire lock on " + lockFile, conflictingApplication);    
+            }   
+        }
+    }
+    
+    /**
+     * An exception thrown if the database is currently in use.
+     */
+    private static class ConcurrentDbAccessException extends Exception {
+        private final String conflictingApplicationName;
+
+        /**
+         * Constructor.
+         * @param message The exception message.
+         * @param conflictingApplicationName The conflicting application name (or null if unknown).
+         */
+        public ConcurrentDbAccessException(String message, String conflictingApplicationName) {
+            super(message);
+            this.conflictingApplicationName = conflictingApplicationName;
+        }
+
+        /**
+         * @return The conflicting application name (or null if unknown).
+         */
+        public String getConflictingApplicationName() {
+            return conflictingApplicationName;
+        }
     }
 
     /**
@@ -2725,7 +2783,11 @@ public class Case {
         "Case.progressMessage.creatingCaseDatabase=Creating case database...",
         "# {0} - exception message", "Case.exceptionMessage.couldNotGetDbServerConnectionInfo=Failed to get case database server conneciton info:\n{0}.",
         "# {0} - exception message", "Case.exceptionMessage.couldNotCreateCaseDatabase=Failed to create case database:\n{0}.",
-        "# {0} - exception message", "Case.exceptionMessage.couldNotSaveDbNameToMetadataFile=Failed to save case database name to case metadata file:\n{0}."
+        "# {0} - exception message", "Case.exceptionMessage.couldNotSaveDbNameToMetadataFile=Failed to save case database name to case metadata file:\n{0}.",
+        "Case_createCaseDatabase_fileLock_ioException=An error occurred while trying to get an exclusive lock on the case.",
+        "# {0} - appplicationName",
+        "Case_createCaseDatabase_fileLock_concurrentAccessException=The case is open in {0}. Please close it before attempting to open it in Autopsy.",
+        "Case_createCaseDatabase_fileLock_concurrentAccessException_defaultApp=another application"
     })
     private void createCaseDatabase(ProgressIndicator progressIndicator) throws CaseActionException {
         progressIndicator.progress(Bundle.Case_progressMessage_creatingCaseDatabase());
@@ -2736,6 +2798,16 @@ public class Case {
                  * with a standard name, physically located in the case
                  * directory.
                  */
+                try {
+                    tryAcquireFileLock(metadata.getCaseDirectory());
+                } catch (IOException ex) {
+                    throw new CaseActionException(Bundle.Case_createCaseDatabase_fileLock_ioException(), ex);
+                } catch (ConcurrentDbAccessException ex) {
+                    throw new CaseActionException(Bundle.Case_createCaseDatabase_fileLock_concurrentAccessException(
+                            StringUtils.defaultIfBlank(ex.getConflictingApplicationName(), 
+                                    Bundle.Case_createCaseDatabase_fileLock_concurrentAccessException_defaultApp())
+                    ), ex);
+                }
                 caseDb = SleuthkitCase.newCase(Paths.get(metadata.getCaseDirectory(), SINGLE_USER_CASE_DB_NAME).toString());
                 metadata.setCaseDatabaseName(SINGLE_USER_CASE_DB_NAME);
             } else {
@@ -2772,7 +2844,11 @@ public class Case {
         "# {0} - exception message", "Case.exceptionMessage.couldNotOpenCaseDatabase=Failed to open case database:\n{0}.",
         "# {0} - exception message", "Case.exceptionMessage.unsupportedSchemaVersionMessage=Unsupported case database schema version:\n{0}.",
         "Case.exceptionMessage.contentProviderCouldNotBeFound=Content provider was specified for the case but could not be loaded.",
-        "Case.open.exception.multiUserCaseNotEnabled=Cannot open a multi-user case if multi-user cases are not enabled. See Tools, Options, Multi-User."
+        "Case.open.exception.multiUserCaseNotEnabled=Cannot open a multi-user case if multi-user cases are not enabled. See Tools, Options, Multi-User.",
+        "Case_openCaseDataBase_fileLock_ioException=An error occurred while trying to get an exclusive lock on the case.",
+        "# {0} - appplicationName",
+        "Case_openCaseDataBase_fileLock_concurrentAccessException=The case is open in {0}. Please close it before attempting to open it in Autopsy.",
+        "Case_openCaseDataBase_fileLock_concurrentAccessException_defaultApp=another application"
     })
     private void openCaseDataBase(ProgressIndicator progressIndicator) throws CaseActionException {
         progressIndicator.progress(Bundle.Case_progressMessage_openingCaseDatabase());
@@ -2788,6 +2864,16 @@ public class Case {
             }
             
             if (CaseType.SINGLE_USER_CASE == metadata.getCaseType()) {
+                try {
+                    tryAcquireFileLock(metadata.getCaseDirectory());
+                } catch (IOException ex) {
+                    throw new CaseActionException(Bundle.Case_openCaseDataBase_fileLock_ioException(), ex);
+                } catch (ConcurrentDbAccessException ex) {
+                    throw new CaseActionException(Bundle.Case_openCaseDataBase_fileLock_concurrentAccessException(
+                            StringUtils.defaultIfBlank(ex.getConflictingApplicationName(), 
+                                    Bundle.Case_openCaseDataBase_fileLock_concurrentAccessException_defaultApp())
+                    ), ex);
+                }
                 caseDb = SleuthkitCase.openCase(metadata.getCaseDatabasePath(), contentProvider);
             } else if (UserPreferences.getIsMultiUserModeEnabled()) {
                 caseDb = SleuthkitCase.openCase(databaseName, UserPreferences.getDatabaseConnectionInfo(), metadata.getCaseDirectory(), contentProvider);
@@ -3098,6 +3184,34 @@ public class Case {
                 collaborationMonitor.shutdown();
             }
             eventPublisher.closeRemoteEventChannel();
+        } 
+        
+        if (this.lockFileLock != null) {
+            try {
+                this.lockFileLock.close();
+                this.lockFileLock = null;
+            } catch (Exception ex) {
+                logger.log(Level.WARNING, "There was an error closing the lock file lock", ex);
+            }
+        }
+        
+        if (this.lockFileChannel != null) {
+            try {
+                this.lockFileChannel.close();
+                this.lockFileChannel = null;
+            } catch (Exception ex) {
+                logger.log(Level.WARNING, "There was an error closing the lock file channel", ex);
+            }
+        }
+                
+                
+        if (this.lockFileRaf != null) {
+            try {
+                this.lockFileRaf.close();
+                this.lockFileRaf = null;
+            } catch (Exception ex) {
+                logger.log(Level.WARNING, "There was an error closing the lock file random access file", ex);
+            }
         }
 
         /*
