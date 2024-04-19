@@ -801,6 +801,9 @@ public class Case {
             } finally {
                 throw new ConcurrentDbAccessException("Unable to acquire lock on " + lockFile, conflictingApplication);    
             }   
+        } else {
+            lockFileRaf.setLength(0);
+            lockFileRaf.writeChars(APP_NAME);
         }
     }
     
