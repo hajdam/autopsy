@@ -32,8 +32,8 @@ import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
 import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.lang.reflect.InvocationTargetException;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -78,6 +78,7 @@ import org.sleuthkit.autopsy.actions.OpenOutputFolderAction;
 import org.sleuthkit.autopsy.appservices.AutopsyService;
 import org.sleuthkit.autopsy.appservices.AutopsyService.CaseContext;
 import org.sleuthkit.autopsy.casemodule.CaseMetadata.CaseMetadataException;
+import org.sleuthkit.autopsy.casemodule.TskLockResources.ConcurrentDbAccessException;
 import org.sleuthkit.autopsy.datasourcesummary.ui.DataSourceSummaryAction;
 import org.sleuthkit.autopsy.casemodule.events.AddingDataSourceEvent;
 import org.sleuthkit.autopsy.casemodule.events.AddingDataSourceFailedEvent;
@@ -183,7 +184,6 @@ public class Case {
     private static final String CASE_RESOURCES_THREAD_NAME = "%s-manage-case-resources";
     private static final String NO_NODE_ERROR_MSG_FRAGMENT = "KeeperErrorCode = NoNode";
     private static final String CT_PROVIDER_PREFIX = "CTStandardContentProvider_";
-    private static final String LOCK_FILE_NAME = "lock";
     private static final Logger logger = Logger.getLogger(Case.class.getName());
     private static final AutopsyEventPublisher eventPublisher = new AutopsyEventPublisher();
     private static final Object caseActionSerializationLock = new Object();
@@ -199,11 +199,8 @@ public class Case {
     private final SleuthkitEventListener sleuthkitEventListener;
     private CollaborationMonitor collaborationMonitor;
     private Services caseServices;
-
-    private RansomAccessFile lockFileRaf = null;
-    private FileChannel lockFileChannel = null;
-    private FileLock lockFileLock = null;
-        
+    
+    private TskLockResources tskLockResources = null;    
     private volatile boolean hasDataSource = false;
     private volatile boolean hasData = false;
 
@@ -217,6 +214,7 @@ public class Case {
             mainFrame = WindowManager.getDefault().getMainWindow();
         });
     }
+    
 
     /**
      * An enumeration of case types.
@@ -777,59 +775,6 @@ public class Case {
                 || caseName.contains("<") || caseName.contains(">") || caseName.contains("|"));
     }
     
-    
-    /**
-     * Try to acquire a lock to the lock file in the case directory.
-     * @param caseDir The case directory that the autopsy.db is in.
-     * @throws IllegalAccessException
-     * @throws IOException 
-     */
-    private void tryAcquireFileLock(String caseDir) throws ConcurrentDbAccessException, IOException {
-        File lockFile = new File(caseDir, LOCK_FILE_NAME);
-        lockFile.getParentFile().mkdirs();
-        lockFileRaf = new RandomAccessFile(lockFile, "rw");
-        lockFileChannel = lockFileRaf.getChannel();
-        lockFileLock = lockFileChannel.tryLock();
-        if (lockFileLock == null) {
-            String conflictingApplication = null;
-            try {
-            StringBuffer buffer = new StringBuffer();
-            while (lockFileRaf.getFilePointer() < lockFileRaf.length()) {
-                buffer.append(lockFileRaf.readLine() + System.lineSeparator());
-            }
-            conflictingApplication = buffer.toString();
-            } finally {
-                throw new ConcurrentDbAccessException("Unable to acquire lock on " + lockFile, conflictingApplication);    
-            }   
-        } else {
-            lockFileRaf.setLength(0);
-            lockFileRaf.writeChars(APP_NAME);
-        }
-    }
-    
-    /**
-     * An exception thrown if the database is currently in use.
-     */
-    private static class ConcurrentDbAccessException extends Exception {
-        private final String conflictingApplicationName;
-
-        /**
-         * Constructor.
-         * @param message The exception message.
-         * @param conflictingApplicationName The conflicting application name (or null if unknown).
-         */
-        public ConcurrentDbAccessException(String message, String conflictingApplicationName) {
-            super(message);
-            this.conflictingApplicationName = conflictingApplicationName;
-        }
-
-        /**
-         * @return The conflicting application name (or null if unknown).
-         */
-        public String getConflictingApplicationName() {
-            return conflictingApplicationName;
-        }
-    }
 
     /**
      * Creates a new case and makes it the current case.
@@ -2802,13 +2747,13 @@ public class Case {
                  * directory.
                  */
                 try {
-                    tryAcquireFileLock(metadata.getCaseDirectory());
-                } catch (IOException ex) {
-                    throw new CaseActionException(Bundle.Case_createCaseDatabase_fileLock_ioException(), ex);
+                    this.tskLockResources = TskLockResources.tryAcquireFileLock(metadata.getCaseDirectory(), UserPreferences.getAppName());
+                } catch (IOException | OverlappingFileLockException ex) {
+                    throw new CaseActionException(Bundle.Case_openCaseDataBase_fileLock_ioException(), ex);
                 } catch (ConcurrentDbAccessException ex) {
-                    throw new CaseActionException(Bundle.Case_createCaseDatabase_fileLock_concurrentAccessException(
+                    throw new CaseActionException(Bundle.Case_openCaseDataBase_fileLock_concurrentAccessException(
                             StringUtils.defaultIfBlank(ex.getConflictingApplicationName(), 
-                                    Bundle.Case_createCaseDatabase_fileLock_concurrentAccessException_defaultApp())
+                                    Bundle.Case_openCaseDataBase_fileLock_concurrentAccessException_defaultApp())
                     ), ex);
                 }
                 caseDb = SleuthkitCase.newCase(Paths.get(metadata.getCaseDirectory(), SINGLE_USER_CASE_DB_NAME).toString());
@@ -2868,8 +2813,8 @@ public class Case {
             
             if (CaseType.SINGLE_USER_CASE == metadata.getCaseType()) {
                 try {
-                    tryAcquireFileLock(metadata.getCaseDirectory());
-                } catch (IOException ex) {
+                    this.tskLockResources = TskLockResources.tryAcquireFileLock(metadata.getCaseDirectory(), UserPreferences.getAppName());
+                } catch (IOException | OverlappingFileLockException ex) {
                     throw new CaseActionException(Bundle.Case_openCaseDataBase_fileLock_ioException(), ex);
                 } catch (ConcurrentDbAccessException ex) {
                     throw new CaseActionException(Bundle.Case_openCaseDataBase_fileLock_concurrentAccessException(
@@ -3189,34 +3134,15 @@ public class Case {
             eventPublisher.closeRemoteEventChannel();
         } 
         
-        if (this.lockFileLock != null) {
+        if (this.tskLockResources != null) {
             try {
-                this.lockFileLock.close();
-                this.lockFileLock = null;
+                this.tskLockResources.close();
+                this.tskLockResources = null;
             } catch (Exception ex) {
-                logger.log(Level.WARNING, "There was an error closing the lock file lock", ex);
+                logger.log(Level.WARNING, "There was an error closing the TSK case lock resources", ex);
             }
         }
         
-        if (this.lockFileChannel != null) {
-            try {
-                this.lockFileChannel.close();
-                this.lockFileChannel = null;
-            } catch (Exception ex) {
-                logger.log(Level.WARNING, "There was an error closing the lock file channel", ex);
-            }
-        }
-                
-                
-        if (this.lockFileRaf != null) {
-            try {
-                this.lockFileRaf.close();
-                this.lockFileRaf = null;
-            } catch (Exception ex) {
-                logger.log(Level.WARNING, "There was an error closing the lock file random access file", ex);
-            }
-        }
-
         /*
          * Allow all registered application services providers to close
          * resources related to the case.
