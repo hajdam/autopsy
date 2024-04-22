@@ -31,9 +31,7 @@ import java.awt.event.ActionListener;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
 import java.io.File;
-import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
-import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -78,7 +76,6 @@ import org.sleuthkit.autopsy.actions.OpenOutputFolderAction;
 import org.sleuthkit.autopsy.appservices.AutopsyService;
 import org.sleuthkit.autopsy.appservices.AutopsyService.CaseContext;
 import org.sleuthkit.autopsy.casemodule.CaseMetadata.CaseMetadataException;
-import org.sleuthkit.autopsy.casemodule.TskLockResources.ConcurrentDbAccessException;
 import org.sleuthkit.autopsy.datasourcesummary.ui.DataSourceSummaryAction;
 import org.sleuthkit.autopsy.casemodule.events.AddingDataSourceEvent;
 import org.sleuthkit.autopsy.casemodule.events.AddingDataSourceFailedEvent;
@@ -148,6 +145,7 @@ import org.sleuthkit.autopsy.timeline.OpenTimelineAction;
 import org.sleuthkit.autopsy.timeline.events.TimelineEventAddedEvent;
 import org.sleuthkit.datamodel.BlackboardArtifactTag;
 import org.sleuthkit.datamodel.CaseDbConnectionInfo;
+import org.sleuthkit.datamodel.ConcurrentDbAccessException;
 import org.sleuthkit.datamodel.Content;
 import org.sleuthkit.datamodel.ContentStreamProvider;
 import org.sleuthkit.datamodel.ContentTag;
@@ -199,8 +197,7 @@ public class Case {
     private final SleuthkitEventListener sleuthkitEventListener;
     private CollaborationMonitor collaborationMonitor;
     private Services caseServices;
-    
-    private TskLockResources tskLockResources = null;    
+
     private volatile boolean hasDataSource = false;
     private volatile boolean hasData = false;
 
@@ -214,7 +211,6 @@ public class Case {
             mainFrame = WindowManager.getDefault().getMainWindow();
         });
     }
-    
 
     /**
      * An enumeration of case types.
@@ -774,7 +770,6 @@ public class Case {
                 || caseName.contains("*") || caseName.contains("?") || caseName.contains("\"")
                 || caseName.contains("<") || caseName.contains(">") || caseName.contains("|"));
     }
-    
 
     /**
      * Creates a new case and makes it the current case.
@@ -2731,11 +2726,7 @@ public class Case {
         "Case.progressMessage.creatingCaseDatabase=Creating case database...",
         "# {0} - exception message", "Case.exceptionMessage.couldNotGetDbServerConnectionInfo=Failed to get case database server conneciton info:\n{0}.",
         "# {0} - exception message", "Case.exceptionMessage.couldNotCreateCaseDatabase=Failed to create case database:\n{0}.",
-        "# {0} - exception message", "Case.exceptionMessage.couldNotSaveDbNameToMetadataFile=Failed to save case database name to case metadata file:\n{0}.",
-        "Case_createCaseDatabase_fileLock_ioException=An error occurred while trying to get an exclusive lock on the case.",
-        "# {0} - appplicationName",
-        "Case_createCaseDatabase_fileLock_concurrentAccessException=The case is open in {0}. Please close it before attempting to open it in Autopsy.",
-        "Case_createCaseDatabase_fileLock_concurrentAccessException_defaultApp=another application"
+        "# {0} - exception message", "Case.exceptionMessage.couldNotSaveDbNameToMetadataFile=Failed to save case database name to case metadata file:\n{0}."
     })
     private void createCaseDatabase(ProgressIndicator progressIndicator) throws CaseActionException {
         progressIndicator.progress(Bundle.Case_progressMessage_creatingCaseDatabase());
@@ -2746,17 +2737,7 @@ public class Case {
                  * with a standard name, physically located in the case
                  * directory.
                  */
-                try {
-                    this.tskLockResources = TskLockResources.tryAcquireFileLock(metadata.getCaseDirectory(), UserPreferences.getAppName());
-                } catch (IOException | OverlappingFileLockException ex) {
-                    throw new CaseActionException(Bundle.Case_openCaseDataBase_fileLock_ioException(), ex);
-                } catch (ConcurrentDbAccessException ex) {
-                    throw new CaseActionException(Bundle.Case_openCaseDataBase_fileLock_concurrentAccessException(
-                            StringUtils.defaultIfBlank(ex.getConflictingApplicationName(), 
-                                    Bundle.Case_openCaseDataBase_fileLock_concurrentAccessException_defaultApp())
-                    ), ex);
-                }
-                caseDb = SleuthkitCase.newCase(Paths.get(metadata.getCaseDirectory(), SINGLE_USER_CASE_DB_NAME).toString());
+                caseDb = SleuthkitCase.newCase(Paths.get(metadata.getCaseDirectory(), SINGLE_USER_CASE_DB_NAME, APP_NAME).toString());
                 metadata.setCaseDatabaseName(SINGLE_USER_CASE_DB_NAME);
             } else {
                 /*
@@ -2768,6 +2749,7 @@ public class Case {
                 metadata.setCaseDatabaseName(caseDb.getDatabaseName());
             }
         } catch (TskCoreException ex) {
+            throwIfConcurrentDbAccessException(ex);
             throw new CaseActionException(Bundle.Case_exceptionMessage_couldNotCreateCaseDatabase(ex.getLocalizedMessage()), ex);
         } catch (UserPreferencesException ex) {
             throw new CaseActionException(Bundle.Case_exceptionMessage_couldNotGetDbServerConnectionInfo(ex.getLocalizedMessage()), ex);
@@ -2792,17 +2774,13 @@ public class Case {
         "# {0} - exception message", "Case.exceptionMessage.couldNotOpenCaseDatabase=Failed to open case database:\n{0}.",
         "# {0} - exception message", "Case.exceptionMessage.unsupportedSchemaVersionMessage=Unsupported case database schema version:\n{0}.",
         "Case.exceptionMessage.contentProviderCouldNotBeFound=Content provider was specified for the case but could not be loaded.",
-        "Case.open.exception.multiUserCaseNotEnabled=Cannot open a multi-user case if multi-user cases are not enabled. See Tools, Options, Multi-User.",
-        "Case_openCaseDataBase_fileLock_ioException=An error occurred while trying to get an exclusive lock on the case.",
-        "# {0} - appplicationName",
-        "Case_openCaseDataBase_fileLock_concurrentAccessException=The case is open in {0}. Please close it before attempting to open it in Autopsy.",
-        "Case_openCaseDataBase_fileLock_concurrentAccessException_defaultApp=another application"
+        "Case.open.exception.multiUserCaseNotEnabled=Cannot open a multi-user case if multi-user cases are not enabled. See Tools, Options, Multi-User."
     })
     private void openCaseDataBase(ProgressIndicator progressIndicator) throws CaseActionException {
         progressIndicator.progress(Bundle.Case_progressMessage_openingCaseDatabase());
         try {
             String databaseName = metadata.getCaseDatabaseName();
-            
+
             ContentStreamProvider contentProvider = loadContentProvider(metadata.getContentProviderName());
             if (StringUtils.isNotBlank(metadata.getContentProviderName()) && contentProvider == null) {
                 if (metadata.getContentProviderName().trim().toUpperCase().startsWith(CT_PROVIDER_PREFIX.toUpperCase())) {
@@ -2810,19 +2788,9 @@ public class Case {
                 }
                 throw new CaseActionException(Bundle.Case_exceptionMessage_contentProviderCouldNotBeFound());
             }
-            
+
             if (CaseType.SINGLE_USER_CASE == metadata.getCaseType()) {
-                try {
-                    this.tskLockResources = TskLockResources.tryAcquireFileLock(metadata.getCaseDirectory(), UserPreferences.getAppName());
-                } catch (IOException | OverlappingFileLockException ex) {
-                    throw new CaseActionException(Bundle.Case_openCaseDataBase_fileLock_ioException(), ex);
-                } catch (ConcurrentDbAccessException ex) {
-                    throw new CaseActionException(Bundle.Case_openCaseDataBase_fileLock_concurrentAccessException(
-                            StringUtils.defaultIfBlank(ex.getConflictingApplicationName(), 
-                                    Bundle.Case_openCaseDataBase_fileLock_concurrentAccessException_defaultApp())
-                    ), ex);
-                }
-                caseDb = SleuthkitCase.openCase(metadata.getCaseDatabasePath(), contentProvider);
+                caseDb = SleuthkitCase.openCase(metadata.getCaseDatabasePath(), contentProvider, APP_NAME);
             } else if (UserPreferences.getIsMultiUserModeEnabled()) {
                 caseDb = SleuthkitCase.openCase(databaseName, UserPreferences.getDatabaseConnectionInfo(), metadata.getCaseDirectory(), contentProvider);
             } else {
@@ -2834,7 +2802,39 @@ public class Case {
         } catch (UserPreferencesException ex) {
             throw new CaseActionException(Bundle.Case_exceptionMessage_couldNotGetDbServerConnectionInfo(ex.getLocalizedMessage()), ex);
         } catch (TskCoreException ex) {
-            throw new CaseActionException(Bundle.Case_exceptionMessage_couldNotOpenCaseDatabase(ex.getLocalizedMessage()), ex);
+            throwIfConcurrentDbAccessException(ex);
+            throw new CaseActionException(Bundle.Case_exceptionMessage_couldNotOpenCaseDatabase(ex.getLocalizedMessage()), ex);    
+        }
+    }
+    
+    
+    /**
+     * Throws a CaseActionException if the exception or any nested exception is a ConcurrentDbAccessException (max depth of 10)
+     * @param ex The exception.
+     * @throws CaseActionException Thrown if there is a concurrent db access exception.
+     */
+    @Messages({
+        "# {0} - appplicationName",
+        "Case_throwIfConcurrentDbAccessException_fileLock_concurrentAccessException=The case is open in {0}. Please close it before attempting to open it in Autopsy.",
+        "Case_throwIfConcurrentDbAccessException_fileLock_concurrentAccessException_defaultApp=another application"
+    })
+    private void throwIfConcurrentDbAccessException(Exception ex) throws CaseActionException {
+        ConcurrentDbAccessException concurrentEx = null;
+        Throwable curEx = ex;
+        // max depth search for a concurrent db access exception will be 10
+        for (int i = 0; i < 10; i++) {
+            if (curEx instanceof ConcurrentDbAccessException foundEx) {
+                concurrentEx = foundEx;
+                break;
+            }
+            curEx = curEx.getCause();
+        }
+        
+        if (concurrentEx != null) {
+            throw new CaseActionException(Bundle.Case_throwIfConcurrentDbAccessException_fileLock_concurrentAccessException(
+                    StringUtils.defaultIfBlank(concurrentEx.getConflictingApplicationName(),
+                            Bundle.Case_throwIfConcurrentDbAccessException_fileLock_concurrentAccessException_defaultApp())
+            ), concurrentEx);
         }
     }
     
@@ -3132,17 +3132,8 @@ public class Case {
                 collaborationMonitor.shutdown();
             }
             eventPublisher.closeRemoteEventChannel();
-        } 
-        
-        if (this.tskLockResources != null) {
-            try {
-                this.tskLockResources.close();
-                this.tskLockResources = null;
-            } catch (Exception ex) {
-                logger.log(Level.WARNING, "There was an error closing the TSK case lock resources", ex);
-            }
         }
-        
+
         /*
          * Allow all registered application services providers to close
          * resources related to the case.

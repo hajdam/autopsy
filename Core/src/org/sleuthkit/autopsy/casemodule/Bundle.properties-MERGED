@@ -111,13 +111,8 @@ Case_checkImagePaths_exceptionOccurred=An exception occurred while checking if i
 # {0} - paths
 Case_checkImagePaths_noPaths=The following images had no associated paths: {0}
 # {0} - appplicationName
-Case_createCaseDatabase_fileLock_concurrentAccessException=The case is open in {0}. Please close it before attempting to open it in Autopsy.
-Case_createCaseDatabase_fileLock_concurrentAccessException_defaultApp=another application
-Case_createCaseDatabase_fileLock_ioException=An error occurred while trying to get an exclusive lock on the case.
-# {0} - appplicationName
-Case_openCaseDataBase_fileLock_concurrentAccessException=The case is open in {0}. Please close it before attempting to open it in Autopsy.
-Case_openCaseDataBase_fileLock_concurrentAccessException_defaultApp=another application
-Case_openCaseDataBase_fileLock_ioException=An error occurred while trying to get an exclusive lock on the case.
+Case_throwIfConcurrentDbAccessException_fileLock_concurrentAccessException=The case is open in {0}. Please close it before attempting to open it in Autopsy.
+Case_throwIfConcurrentDbAccessException_fileLock_concurrentAccessException_defaultApp=another application
 CaseDetailsPanel.casePanel.border.title=Case
 CaseDetailsPanel.examinerLabel.text=Name:
 CaseDetailsPanel.examinerPanel.border.title=Examiner
