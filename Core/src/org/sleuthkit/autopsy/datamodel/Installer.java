@@ -19,7 +19,6 @@
 package org.sleuthkit.autopsy.datamodel;
 
 import java.awt.Component;
-import java.io.IOException;
 import java.util.logging.Level;
 
 import org.openide.util.NbBundle;
@@ -51,7 +50,7 @@ public class Installer extends ModuleInstall {
 
     @Messages({
         "Installer_validate_tskLibLock_title=Error calling Sleuth Kit library",
-        "Installer_validate_tskLibLock_description=It appears that an older version of an application that opens The Sleuth Kit databases is currently running on your system.  Close this application before opening Autopsy, and consider upgrading in order to have a better user experience."
+        "Installer_validate_tskLibLock_description=<html>It appears that an older version of an application that opens The Sleuth Kit databases is currently running on your system.<br/>  Close this application before opening Autopsy, and consider upgrading in order to have a better user experience.</html>"
     })
     @Override
     public void validate() throws IllegalStateException {
@@ -70,13 +69,9 @@ public class Installer extends ModuleInstall {
         Logger logger = Logger.getLogger(Installer.class.getName());
 
         try {
-            try {
-                TskLibLock libLock = TskLibLock.acquireLibLock();
-                if (libLock != null && libLock.getLockState() == LockState.HELD_BY_OLD) {
-                    throw new OldAppLockException("A lock on the libtsk_jni lib is already held by an old application.  " + (libLock.getLibTskJniFile() != null ? libLock.getLibTskJniFile().getAbsolutePath() : ""));
-                }
-            } catch (IOException ex) {
-                logger.log(Level.SEVERE, "An error occurred while acquiring the TSK lib lock", ex);
+            TskLibLock libLock = TskLibLock.acquireLibLock();
+            if (libLock != null && libLock.getLockState() == LockState.HELD_BY_OLD) {
+                throw new OldAppLockException("A lock on the libtsk_jni lib is already held by an old application.  " + (libLock.getLibTskJniFile() != null ? libLock.getLibTskJniFile().getAbsolutePath() : ""));
             }
                     
             String skVersion = SleuthkitJNI.getVersion();
@@ -120,7 +115,30 @@ public class Installer extends ModuleInstall {
         }
 
     }
+
+    @Override
+    public void close() {
+        try {
+            TskLibLock.removeLibLock();
+        } catch (Exception ex) {
+            Logger logger = Logger.getLogger(Installer.class.getName());
+            logger.log(Level.WARNING, "There was an error removing the TSK lib lock.", ex);
+        }
+    }
+
+    @Override
+    public void uninstalled() {
+        try {
+            TskLibLock.removeLibLock();
+        } catch (Exception ex) {
+            Logger logger = Logger.getLogger(Installer.class.getName());
+            logger.log(Level.WARNING, "There was an error removing the TSK lib lock.", ex);
+        }
+    }
     
+    
+    
+
     /**
      * An exception when an older application (Autopsy
      */

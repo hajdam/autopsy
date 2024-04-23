@@ -26,6 +26,7 @@ import java.nio.channels.FileLock;
 import java.nio.file.Paths;
 import java.text.MessageFormat;
 import java.util.Arrays;
+import java.util.logging.Level;
 
 /**
  * Creates a file lock at the old location (Autopsy LTE 4.21.0) of TSK
@@ -58,7 +59,7 @@ class TskLibLock implements AutoCloseable {
      * acquired) and any resources if the lock is acquired.
      * @throws IOException
      */
-    static TskLibLock acquireLibLock() throws IOException {
+    static TskLibLock acquireLibLock() {
         if (libLock == null) {
             libLock = getLibLock();
         }
@@ -84,7 +85,7 @@ class TskLibLock implements AutoCloseable {
      * acquired) and any resources if the lock is acquired.
      * @throws IOException
      */
-    private static TskLibLock getLibLock() throws IOException {
+    private static TskLibLock getLibLock() {
         // TODO error handling cleanup
 
         String libExt = getLibExtension();
@@ -104,38 +105,43 @@ class TskLibLock implements AutoCloseable {
                         : LockState.HELD_BY_OLD;
 
                 return new TskLibLock(lockState, libTskJniFile, lockFileRaf, null, null);
+            } catch (IOException ex) {
+                // if there is an error getting read only access, then it is the old application dll
+                java.util.logging.Logger.getLogger(TskLibLock.class.getCanonicalName()).log(Level.WARNING, "An error occurred while acquiring the TSK lib lock", ex);
+                return new TskLibLock(LockState.HELD_BY_OLD, libTskJniFile, null, null, null);
             }
         } else {
             // make directories leading up to that
             libTskJniFile.getParentFile().mkdirs();
 
             // get file access to the file
-            RandomAccessFile lockFileRaf = new RandomAccessFile(libTskJniFile, "rw");
-            FileChannel lockFileChannel = lockFileRaf.getChannel();
-            FileLock lockFileLock = lockFileChannel == null
-                    ? null
-                    : lockFileChannel.tryLock(1024L, 1L, false);
+            RandomAccessFile lockFileRaf = null;
+            FileChannel lockFileChannel = null;
+            FileLock lockFileLock = null;
+            try {
+                lockFileRaf = new RandomAccessFile(libTskJniFile, "rw");
+                lockFileChannel = lockFileRaf.getChannel();
+                lockFileLock = lockFileChannel == null
+                        ? null
+                        : lockFileChannel.tryLock(1024L, 1L, false);
 
-            if (lockFileLock != null) {
-                lockFileRaf.setLength(0);
-                lockFileRaf.write(UTF8_BOM);
-                lockFileRaf.writeChars(LIB_FILE_LOCK_TEXT);
+                if (lockFileLock != null) {
+                    lockFileRaf.setLength(0);
+                    lockFileRaf.write(UTF8_BOM);
+                    lockFileRaf.writeChars(LIB_FILE_LOCK_TEXT);
 
-                return new TskLibLock(LockState.ACQUIRED, libTskJniFile, lockFileRaf, lockFileChannel, lockFileLock);
-            } else {
-                if (lockFileChannel != null) {
-                    lockFileChannel.close();
+                    return new TskLibLock(LockState.ACQUIRED, libTskJniFile, lockFileRaf, lockFileChannel, lockFileLock);
+                } else {
+                    LockState lockState = isNewLock(lockFileRaf)
+                            ? LockState.HELD_BY_NEW
+                            : LockState.HELD_BY_OLD;
+
+                    return new TskLibLock(lockState, libTskJniFile, lockFileRaf, lockFileChannel, null);
                 }
-
-                if (lockFileRaf != null) {
-                    lockFileRaf.close();
-                }
-
-                LockState lockState = isNewLock(lockFileRaf)
-                        ? LockState.HELD_BY_NEW
-                        : LockState.HELD_BY_OLD;
-
-                return new TskLibLock(lockState, libTskJniFile, lockFileRaf, lockFileChannel, null);
+            } catch (IOException ex) {
+                // if there is an error getting read only access, then it is the old application dll
+                java.util.logging.Logger.getLogger(TskLibLock.class.getCanonicalName()).log(Level.WARNING, "An error occurred while acquiring the TSK lib lock", ex);
+                return new TskLibLock(LockState.HELD_BY_OLD, libTskJniFile, lockFileRaf, lockFileChannel, lockFileLock);
             }
         }
     }

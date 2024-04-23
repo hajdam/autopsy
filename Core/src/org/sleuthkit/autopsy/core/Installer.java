@@ -575,11 +575,6 @@ public class Installer extends ModuleInstall {
 
         logger.log(Level.INFO, "close()"); //NON-NLS
 
-        //exit JavaFx plat
-        if (javaFxInit) {
-            Platform.exit();
-        }
-
         for (ModuleInstall mi : packageInstallers) {
             logger.log(Level.INFO, "{0} close()", mi.getClass().getName()); //NON-NLS
             try {
@@ -590,6 +585,11 @@ public class Installer extends ModuleInstall {
         }
         for (Handler h : logger.getHandlers()) {
             h.close();   //must call h.close or a .LCK file will remain.
+        }
+        
+        //exit JavaFx plat
+        if (javaFxInit) {
+            Platform.exit();
         }
     }
 }
