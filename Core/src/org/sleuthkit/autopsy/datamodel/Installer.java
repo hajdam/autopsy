@@ -19,6 +19,7 @@
 package org.sleuthkit.autopsy.datamodel;
 
 import java.awt.Component;
+import java.io.IOException;
 import java.util.logging.Level;
 
 import org.openide.util.NbBundle;
@@ -26,6 +27,8 @@ import org.sleuthkit.autopsy.coreutils.Logger;
 import javax.swing.JOptionPane;
 import org.openide.LifecycleManager;
 import org.openide.modules.ModuleInstall;
+import org.openide.util.NbBundle.Messages;
+import org.sleuthkit.autopsy.datamodel.TskLibLock.LockState;
 import org.sleuthkit.datamodel.SleuthkitJNI;
 
 /**
@@ -46,8 +49,14 @@ public class Installer extends ModuleInstall {
         super();
     }
 
+    @Messages({
+        "Installer_validate_tskLibLock_title=Error calling Sleuth Kit library",
+        "Installer_validate_tskLibLock_description=It appears that an older version of an application that opens The Sleuth Kit databases is currently running on your system.  Close this application before opening Autopsy, and consider upgrading in order to have a better user experience."
+    })
     @Override
     public void validate() throws IllegalStateException {
+
+        
         /*
          * The NetBeans API specifies that a module should throw an
          * IllegalStateException if it can't be initalized, but NetBeans doesn't
@@ -59,7 +68,17 @@ public class Installer extends ModuleInstall {
 
         // Check that the the Sleuth Kit JNI is working by getting the Sleuth Kit version number
         Logger logger = Logger.getLogger(Installer.class.getName());
+
         try {
+            try {
+                TskLibLock libLock = TskLibLock.acquireLibLock();
+                if (libLock != null && libLock.getLockState() == LockState.HELD_BY_OLD) {
+                    throw new OldAppLockException("A lock on the libtsk_jni lib is already held by an old application.  " + (libLock.getLibTskJniFile() != null ? libLock.getLibTskJniFile().getAbsolutePath() : ""));
+                }
+            } catch (IOException ex) {
+                logger.log(Level.SEVERE, "An error occurred while acquiring the TSK lib lock", ex);
+            }
+                    
             String skVersion = SleuthkitJNI.getVersion();
 
             if (skVersion == null) {
@@ -71,15 +90,25 @@ public class Installer extends ModuleInstall {
             }
 
         } catch (Exception | UnsatisfiedLinkError e) {
-            logger.log(Level.SEVERE, "Error calling Sleuth Kit library (test call failed)", e); //NON-NLS
-            logger.log(Level.SEVERE, "Is Autopsy or Cyber Triage already running?)", e); //NON-NLS
-
+            
             // Normal error box log handler won't be loaded yet, so show error here.
             final Component parentComponent = null; // Use default window frame.
-            final String message = NbBundle.getMessage(this.getClass(), "Installer.tskLibErr.msg", e.toString());
-            final String title = NbBundle.getMessage(this.getClass(), "Installer.tskLibErr.err");
             final int messageType = JOptionPane.ERROR_MESSAGE;
 
+            final String message;
+            final String title;
+            
+            if (e instanceof OldAppLockException ex) {
+                logger.log(Level.SEVERE, "An older application already holds a lock on the libtsk_jni lib", ex);
+                message = Bundle.Installer_validate_tskLibLock_description();
+                title = Bundle.Installer_validate_tskLibLock_title();
+            } else {
+                logger.log(Level.SEVERE, "Error calling Sleuth Kit library (test call failed)", e); //NON-NLS
+                logger.log(Level.SEVERE, "Is Autopsy or Cyber Triage already running?)", e); //NON-NLS
+                message = NbBundle.getMessage(this.getClass(), "Installer.tskLibErr.msg", e.toString());
+                title = NbBundle.getMessage(this.getClass(), "Installer.tskLibErr.err");
+            }
+            
             JOptionPane.showMessageDialog(
                     parentComponent,
                     message,
@@ -90,5 +119,16 @@ public class Installer extends ModuleInstall {
             LifecycleManager.getDefault().exit();
         }
 
+    }
+    
+    /**
+     * An exception when an older application (Autopsy
+     */
+    static class OldAppLockException extends Exception {
+
+        public OldAppLockException(String message) {
+            super(message);
+        }
+        
     }
 }
