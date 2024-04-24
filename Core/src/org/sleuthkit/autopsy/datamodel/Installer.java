@@ -50,7 +50,7 @@ public class Installer extends ModuleInstall {
 
     @Messages({
         "Installer_validate_tskLibLock_title=Error calling Sleuth Kit library",
-        "Installer_validate_tskLibLock_description=<html>It appears that an older version of an application that opens The Sleuth Kit databases is currently running on your system.<br/>  Close this application before opening Autopsy, and consider upgrading in order to have a better user experience.</html>"
+        "Installer_validate_tskLibLock_description=<html>Another forensics application is running that uses The Sleuth Kit.<br/>You must close that application before launching Autopsy.<br/>If that application is Cyber Triage, then you should upgrade it so that it can run at the same time as Autopsy.</html>"
     })
     @Override
     public void validate() throws IllegalStateException {
