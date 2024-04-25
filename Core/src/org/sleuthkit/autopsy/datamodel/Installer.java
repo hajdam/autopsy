@@ -27,7 +27,8 @@ import javax.swing.JOptionPane;
 import org.openide.LifecycleManager;
 import org.openide.modules.ModuleInstall;
 import org.openide.util.NbBundle.Messages;
-import org.sleuthkit.autopsy.datamodel.TskLibLock.LockState;
+import org.sleuthkit.datamodel.LibraryLock;
+import org.sleuthkit.datamodel.LibraryLock.LockState;
 import org.sleuthkit.datamodel.SleuthkitJNI;
 
 /**
@@ -69,7 +70,7 @@ public class Installer extends ModuleInstall {
         Logger logger = Logger.getLogger(Installer.class.getName());
 
         try {
-            TskLibLock libLock = TskLibLock.acquireLibLock();
+            LibraryLock libLock = LibraryLock.acquireLibLock();
             if (libLock != null && libLock.getLockState() == LockState.HELD_BY_OLD) {
                 throw new OldAppLockException("A lock on the libtsk_jni lib is already held by an old application.  " + (libLock.getLibTskJniFile() != null ? libLock.getLibTskJniFile().getAbsolutePath() : ""));
             }
@@ -119,7 +120,7 @@ public class Installer extends ModuleInstall {
     @Override
     public void close() {
         try {
-            TskLibLock.removeLibLock();
+            LibraryLock.removeLibLock();
         } catch (Exception ex) {
             Logger logger = Logger.getLogger(Installer.class.getName());
             logger.log(Level.WARNING, "There was an error removing the TSK lib lock.", ex);
@@ -129,7 +130,7 @@ public class Installer extends ModuleInstall {
     @Override
     public void uninstalled() {
         try {
-            TskLibLock.removeLibLock();
+            LibraryLock.removeLibLock();
         } catch (Exception ex) {
             Logger logger = Logger.getLogger(Installer.class.getName());
             logger.log(Level.WARNING, "There was an error removing the TSK lib lock.", ex);
