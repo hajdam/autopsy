@@ -145,6 +145,7 @@ import org.sleuthkit.autopsy.timeline.OpenTimelineAction;
 import org.sleuthkit.autopsy.timeline.events.TimelineEventAddedEvent;
 import org.sleuthkit.datamodel.BlackboardArtifactTag;
 import org.sleuthkit.datamodel.CaseDbConnectionInfo;
+import org.sleuthkit.datamodel.ConcurrentDbAccessException;
 import org.sleuthkit.datamodel.Content;
 import org.sleuthkit.datamodel.ContentStreamProvider;
 import org.sleuthkit.datamodel.ContentTag;
@@ -2736,7 +2737,7 @@ public class Case {
                  * with a standard name, physically located in the case
                  * directory.
                  */
-                caseDb = SleuthkitCase.newCase(Paths.get(metadata.getCaseDirectory(), SINGLE_USER_CASE_DB_NAME).toString());
+                caseDb = SleuthkitCase.newCase(Paths.get(metadata.getCaseDirectory(), SINGLE_USER_CASE_DB_NAME, APP_NAME).toString());
                 metadata.setCaseDatabaseName(SINGLE_USER_CASE_DB_NAME);
             } else {
                 /*
@@ -2748,6 +2749,7 @@ public class Case {
                 metadata.setCaseDatabaseName(caseDb.getDatabaseName());
             }
         } catch (TskCoreException ex) {
+            throwIfConcurrentDbAccessException(ex);
             throw new CaseActionException(Bundle.Case_exceptionMessage_couldNotCreateCaseDatabase(ex.getLocalizedMessage()), ex);
         } catch (UserPreferencesException ex) {
             throw new CaseActionException(Bundle.Case_exceptionMessage_couldNotGetDbServerConnectionInfo(ex.getLocalizedMessage()), ex);
@@ -2778,7 +2780,7 @@ public class Case {
         progressIndicator.progress(Bundle.Case_progressMessage_openingCaseDatabase());
         try {
             String databaseName = metadata.getCaseDatabaseName();
-            
+
             ContentStreamProvider contentProvider = loadContentProvider(metadata.getContentProviderName());
             if (StringUtils.isNotBlank(metadata.getContentProviderName()) && contentProvider == null) {
                 if (metadata.getContentProviderName().trim().toUpperCase().startsWith(CT_PROVIDER_PREFIX.toUpperCase())) {
@@ -2786,9 +2788,9 @@ public class Case {
                 }
                 throw new CaseActionException(Bundle.Case_exceptionMessage_contentProviderCouldNotBeFound());
             }
-            
+
             if (CaseType.SINGLE_USER_CASE == metadata.getCaseType()) {
-                caseDb = SleuthkitCase.openCase(metadata.getCaseDatabasePath(), contentProvider);
+                caseDb = SleuthkitCase.openCase(metadata.getCaseDatabasePath(), contentProvider, APP_NAME);
             } else if (UserPreferences.getIsMultiUserModeEnabled()) {
                 caseDb = SleuthkitCase.openCase(databaseName, UserPreferences.getDatabaseConnectionInfo(), metadata.getCaseDirectory(), contentProvider);
             } else {
@@ -2800,7 +2802,39 @@ public class Case {
         } catch (UserPreferencesException ex) {
             throw new CaseActionException(Bundle.Case_exceptionMessage_couldNotGetDbServerConnectionInfo(ex.getLocalizedMessage()), ex);
         } catch (TskCoreException ex) {
-            throw new CaseActionException(Bundle.Case_exceptionMessage_couldNotOpenCaseDatabase(ex.getLocalizedMessage()), ex);
+            throwIfConcurrentDbAccessException(ex);
+            throw new CaseActionException(Bundle.Case_exceptionMessage_couldNotOpenCaseDatabase(ex.getLocalizedMessage()), ex);    
+        }
+    }
+    
+    
+    /**
+     * Throws a CaseActionException if the exception or any nested exception is a ConcurrentDbAccessException (max depth of 10)
+     * @param ex The exception.
+     * @throws CaseActionException Thrown if there is a concurrent db access exception.
+     */
+    @Messages({
+        "# {0} - appplicationName",
+        "Case_throwIfConcurrentDbAccessException_fileLock_concurrentAccessException=The case is open in {0}. Please close it before attempting to open it in Autopsy.",
+        "Case_throwIfConcurrentDbAccessException_fileLock_concurrentAccessException_defaultApp=another application"
+    })
+    private void throwIfConcurrentDbAccessException(Exception ex) throws CaseActionException {
+        ConcurrentDbAccessException concurrentEx = null;
+        Throwable curEx = ex;
+        // max depth search for a concurrent db access exception will be 10
+        for (int i = 0; i < 10; i++) {
+            if (curEx instanceof ConcurrentDbAccessException foundEx) {
+                concurrentEx = foundEx;
+                break;
+            }
+            curEx = curEx.getCause();
+        }
+        
+        if (concurrentEx != null) {
+            throw new CaseActionException(Bundle.Case_throwIfConcurrentDbAccessException_fileLock_concurrentAccessException(
+                    StringUtils.defaultIfBlank(concurrentEx.getConflictingApplicationName(),
+                            Bundle.Case_throwIfConcurrentDbAccessException_fileLock_concurrentAccessException_defaultApp())
+            ), concurrentEx);
         }
     }
     

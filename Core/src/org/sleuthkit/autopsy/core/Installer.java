@@ -66,11 +66,17 @@ public class Installer extends ModuleInstall {
 
     private static final long serialVersionUID = 1L;
 
+    private static final String JAVA_TEMP = "java.io.tmpdir";
+    private static final String AUTOPSY_TEMP_DIR = "autopsy_temp";
+    private static final String TSK_TEMP = "tsk.tmpdir";
+    
     private final List<ModuleInstall> packageInstallers;
     private static final Logger logger = Logger.getLogger(Installer.class.getName());
     private static volatile boolean javaFxInit = false;
 
     static {
+        setTskTemp();
+        
         loadDynLibraries();
         
         // This call was moved from MediaViewImagePanel so that it is 
@@ -79,6 +85,24 @@ public class Installer extends ModuleInstall {
         
         // This will cause OpenCvLoader to load its library instead of 
         OpenCvLoader.openCvIsLoaded();
+    }
+    
+    /**
+     * Set TSK temp directory to de-conflict with other programs using TSK libs.
+     */
+    private static void setTskTemp() {
+        try {
+            String curTemp = System.getProperty(JAVA_TEMP, "");
+            String tskTemp = curTemp + (curTemp.endsWith(File.separator) ? "" : File.separator) + AUTOPSY_TEMP_DIR;
+            System.setProperty(TSK_TEMP, tskTemp);
+            File tskTempDir = new File(tskTemp);
+            tskTempDir.mkdirs();
+            if (!tskTempDir.isDirectory()) {
+                throw new IOException("Unable to create directory at " + tskTemp);
+            }
+        } catch (Exception ex) {
+            logger.log(Level.WARNING, "There was an error setting up tsk temp directory", ex);
+        }
     }
 
     private static void loadDynLibraries() {
@@ -551,11 +575,6 @@ public class Installer extends ModuleInstall {
 
         logger.log(Level.INFO, "close()"); //NON-NLS
 
-        //exit JavaFx plat
-        if (javaFxInit) {
-            Platform.exit();
-        }
-
         for (ModuleInstall mi : packageInstallers) {
             logger.log(Level.INFO, "{0} close()", mi.getClass().getName()); //NON-NLS
             try {
@@ -566,6 +585,11 @@ public class Installer extends ModuleInstall {
         }
         for (Handler h : logger.getHandlers()) {
             h.close();   //must call h.close or a .LCK file will remain.
+        }
+        
+        //exit JavaFx plat
+        if (javaFxInit) {
+            Platform.exit();
         }
     }
 }

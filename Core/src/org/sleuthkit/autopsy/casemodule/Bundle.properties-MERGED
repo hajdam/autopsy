@@ -110,6 +110,9 @@ Case_caseType_singleUser=Single-user case
 Case_checkImagePaths_exceptionOccurred=An exception occurred while checking if image paths are present
 # {0} - paths
 Case_checkImagePaths_noPaths=The following images had no associated paths: {0}
+# {0} - appplicationName
+Case_throwIfConcurrentDbAccessException_fileLock_concurrentAccessException=The case is open in {0}. Please close it before attempting to open it in Autopsy.
+Case_throwIfConcurrentDbAccessException_fileLock_concurrentAccessException_defaultApp=another application
 CaseDetailsPanel.casePanel.border.title=Case
 CaseDetailsPanel.examinerLabel.text=Name:
 CaseDetailsPanel.examinerPanel.border.title=Examiner
