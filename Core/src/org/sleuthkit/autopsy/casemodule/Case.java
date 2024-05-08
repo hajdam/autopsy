@@ -2737,7 +2737,7 @@ public class Case {
                  * with a standard name, physically located in the case
                  * directory.
                  */
-                caseDb = SleuthkitCase.newCase(Paths.get(metadata.getCaseDirectory(), SINGLE_USER_CASE_DB_NAME, APP_NAME).toString());
+                caseDb = SleuthkitCase.newCase(Paths.get(metadata.getCaseDirectory(), SINGLE_USER_CASE_DB_NAME).toString(), (ContentStreamProvider) null, APP_NAME);
                 metadata.setCaseDatabaseName(SINGLE_USER_CASE_DB_NAME);
             } else {
                 /*
