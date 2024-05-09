@@ -2737,7 +2737,7 @@ public class Case {
                  * with a standard name, physically located in the case
                  * directory.
                  */
-                caseDb = SleuthkitCase.newCase(Paths.get(metadata.getCaseDirectory(), SINGLE_USER_CASE_DB_NAME, APP_NAME).toString());
+                caseDb = SleuthkitCase.newCase(Paths.get(metadata.getCaseDirectory(), SINGLE_USER_CASE_DB_NAME).toString(), (ContentStreamProvider) null, APP_NAME);
                 metadata.setCaseDatabaseName(SINGLE_USER_CASE_DB_NAME);
             } else {
                 /*
@@ -2823,11 +2823,14 @@ public class Case {
         Throwable curEx = ex;
         // max depth search for a concurrent db access exception will be 10
         for (int i = 0; i < 10; i++) {
-            if (curEx instanceof ConcurrentDbAccessException foundEx) {
+            if (curEx == null) {
+                break;
+            } else if (curEx instanceof ConcurrentDbAccessException foundEx) {
                 concurrentEx = foundEx;
                 break;
+            } else {
+                curEx = curEx.getCause();    
             }
-            curEx = curEx.getCause();
         }
         
         if (concurrentEx != null) {
