@@ -21,6 +21,17 @@
 			<location>C:/Development/42six/trunk/thirdparty/pasco2/lib</location>
 		</link>
 	</linkedResources>
+	<filteredResources>
+		<filter>
+			<id>1715884364848</id>
+			<name></name>
+			<type>30</type>
+			<matcher>
+				<id>org.eclipse.core.resources.regexFilterMatcher</id>
+				<arguments>node_modules|\.git|__CREATED_BY_JAVA_LANGUAGE_SERVER__</arguments>
+			</matcher>
+		</filter>
+	</filteredResources>
 	<variableList>
 		<variable>
 			<name>BIN_DIR</name>

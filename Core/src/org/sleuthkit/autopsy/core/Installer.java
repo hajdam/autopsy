@@ -67,7 +67,7 @@ public class Installer extends ModuleInstall {
     private static final long serialVersionUID = 1L;
 
     private static final String JAVA_TEMP = "java.io.tmpdir";
-    private static final String AUTOPSY_TEMP_DIR = "autopsy_temp";
+    private static final String AUTOPSY_TEMP_DIR_SUFFIX = "_temp";
     private static final String TSK_TEMP = "tsk.tmpdir";
     
     private final List<ModuleInstall> packageInstallers;
@@ -93,7 +93,8 @@ public class Installer extends ModuleInstall {
     private static void setTskTemp() {
         try {
             String curTemp = System.getProperty(JAVA_TEMP, "");
-            String tskTemp = curTemp + (curTemp.endsWith(File.separator) ? "" : File.separator) + AUTOPSY_TEMP_DIR;
+            String autopsyTempDir = StringUtils.defaultIfBlank(UserPreferences.getAppName(), "autopsy").replaceAll("[^a-zA-Z0-9_\\-]", "_") + AUTOPSY_TEMP_DIR_SUFFIX;
+            String tskTemp = Paths.get(StringUtils.defaultString(curTemp), autopsyTempDir).toString();
             System.setProperty(TSK_TEMP, tskTemp);
             File tskTempDir = new File(tskTemp);
             tskTempDir.mkdirs();
